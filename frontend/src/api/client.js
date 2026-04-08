@@ -37,6 +37,17 @@ export async function queryGraph(docId, question) {
   return res.json()
 }
 
+export async function fetchConceptDetails(conceptId) {
+  const res = await fetch(`${BASE}/graph/concepts/${conceptId}/details`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Failed to load concept details')
+  }
+  return res.json()
+}
+
 export async function listDocuments() {
   const res = await fetch(`${BASE}/documents/`)
   if (!res.ok) return []

@@ -3,7 +3,14 @@ import GraphCanvas from './components/GraphCanvas'
 import UploadZone from './components/UploadZone'
 import NodePanel from './components/NodePanel'
 import QueryChat from './components/QueryChat'
-import { uploadDocument, pollStatus, fetchGraph, queryGraph, exportGraphUrl } from './api/client'
+import {
+  uploadDocument,
+  pollStatus,
+  fetchGraph,
+  queryGraph,
+  fetchConceptDetails,
+  exportGraphUrl,
+} from './api/client'
 
 export default function App() {
   const [docId, setDocId]               = useState(null)
@@ -13,6 +20,7 @@ export default function App() {
   const [errorMsg, setErrorMsg]         = useState('')
   const [selectedNode, setSelectedNode] = useState(null)
   const [highlightIds, setHighlightIds] = useState([])
+  const [loadingNodeDetailsId, setLoadingNodeDetailsId] = useState(null)
 
   useEffect(() => {
     if (!docId || status !== 'processing') return
@@ -44,6 +52,7 @@ export default function App() {
     setGraphData(null)
     setSelectedNode(null)
     setHighlightIds([])
+    setLoadingNodeDetailsId(null)
     try {
       const { document_id, filename: fn } = await uploadDocument(file)
       setDocId(document_id)
@@ -52,6 +61,7 @@ export default function App() {
     } catch (e) {
       setStatus('error')
       setErrorMsg(e.message)
+      setLoadingNodeDetailsId(null)
     }
   }, [])
 
@@ -64,6 +74,42 @@ export default function App() {
   const handleNodeClick = useCallback((node) => {
     setSelectedNode(node)
     setHighlightIds([node.id])
+    if (node.details) return
+
+    setLoadingNodeDetailsId(node.id)
+    fetchConceptDetails(node.id)
+      .then((enriched) => {
+        setGraphData((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            nodes: prev.nodes.map((n) => (
+              n.id === node.id
+                ? { ...n, summary: enriched.summary || n.summary, details: enriched.details || n.details }
+                : n
+            )),
+          }
+        })
+
+        setSelectedNode((prev) => {
+          if (!prev || prev.id !== node.id) return prev
+          return {
+            ...prev,
+            summary: enriched.summary || prev.summary,
+            details: enriched.details || prev.details,
+            details_error: null,
+          }
+        })
+      })
+      .catch((e) => {
+        setSelectedNode((prev) => {
+          if (!prev || prev.id !== node.id) return prev
+          return { ...prev, details_error: e.message }
+        })
+      })
+      .finally(() => {
+        setLoadingNodeDetailsId((prev) => (prev === node.id ? null : prev))
+      })
   }, [])
 
   const showSidebar = status === 'ready'
@@ -214,7 +260,14 @@ export default function App() {
 
               {/* Selected node detail */}
               {selectedNode ? (
-                <NodePanel node={selectedNode} onClose={() => { setSelectedNode(null); setHighlightIds([]) }} />
+                <NodePanel
+                  node={selectedNode}
+                  loadingDetails={loadingNodeDetailsId === selectedNode.id}
+                  onClose={() => {
+                    setSelectedNode(null)
+                    setHighlightIds([])
+                  }}
+                />
               ) : (
                 <div style={{ color: '#aaa', fontSize: 13, textAlign: 'center', padding: '40px 0' }}>
                   Click a concept card on the canvas to see its details

@@ -40,12 +40,15 @@ async def process_document(doc_id: str, text: str):
 
             concepts_db: list[Concept] = []
             for concept, emb, cluster in zip(raw_concepts, embeddings, cluster_ids):
-                summary = await asyncio.to_thread(summarize_concept, concept["label"], concept["excerpts"])
+                summary, details = await asyncio.to_thread(
+                    summarize_concept, concept["label"], concept["excerpts"]
+                )
                 c = Concept(
                     document_id=doc_uuid,
                     label=concept["label"],
                     entity_type=concept["entity_type"],
                     summary=summary,
+                    details=details,
                     excerpts=concept["excerpts"],
                     cluster_id=cluster,
                     embedding=emb,

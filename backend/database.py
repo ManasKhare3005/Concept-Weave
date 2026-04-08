@@ -39,3 +39,6 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS idx_concepts_embedding_ivfflat "
             "ON concepts USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
         ))
+        await conn.execute(text(
+            "ALTER TABLE concepts ADD COLUMN IF NOT EXISTS details TEXT"
+        ))

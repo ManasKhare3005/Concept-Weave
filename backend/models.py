@@ -24,6 +24,7 @@ class Concept(Base):
     label = Column(String(255), index=True)
     entity_type = Column(String(100))    # PERSON, ORG, CONCEPT, TOPIC ...
     summary = Column(Text)
+    details = Column(Text)
     excerpts = Column(JSON)              # list of source sentences
     cluster_id = Column(String(50))
     embedding = Column(Vector(384))      # all-MiniLM-L6-v2 dim

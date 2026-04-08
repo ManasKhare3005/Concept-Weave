@@ -1,5 +1,7 @@
+import json
 import logging
 import os
+import re
 
 import openai
 
@@ -17,39 +19,90 @@ def _get_client():
     return _client
 
 
-def summarize_concept(label: str, excerpts: list[str]) -> str:
-    """Generate a rich, specific summary for a concept node."""
+def _extract_json_object(raw: str) -> dict:
+    fence_match = re.search(r"```(?:json)?\s*({.*?})\s*```", raw, re.DOTALL)
+    if fence_match:
+        return json.loads(fence_match.group(1))
+
+    object_match = re.search(r"{.*}", raw, re.DOTALL)
+    if object_match:
+        return json.loads(object_match.group(0))
+
+    return json.loads(raw)
+
+
+def _fallback_summary(excerpts: list[str]) -> str:
+    if excerpts:
+        return "\n".join(f"- {line}" for line in excerpts[:3])
+    return "- No summary available."
+
+
+def _fallback_details(label: str, excerpts: list[str], summary: str) -> str:
+    quoted = excerpts[:2]
+    quoted_text = "\n".join(f"- {line}" for line in quoted) if quoted else "- No excerpts available."
+    return (
+        f"## Core Idea\n{label} appears as an important concept in this document.\n\n"
+        f"## What to Remember\n{summary.replace(chr(10), ' ')}\n\n"
+        f"## Evidence from Source\n{quoted_text}"
+    )
+
+
+def summarize_concept(label: str, excerpts: list[str]) -> tuple[str, str]:
+    """
+    Generate two layers of concept text:
+    1) concise card summary bullets
+    2) richer sidebar markdown details
+    """
     try:
         context = "\n".join(f"- {e}" for e in excerpts[:6])
         msg = _get_client().chat.completions.create(
             model="llama-3.3-70b-versatile",
-            max_tokens=350,
+            max_tokens=700,
+            temperature=0.2,
             messages=[
                 {
                     "role": "user",
                     "content": (
-                        f"Summarize '{label}' based on these excerpts:\n"
-                        f"{context}\n\n"
+                        f"Concept: {label}\n"
+                        f"Excerpts:\n{context}\n\n"
+                        "Return ONLY valid JSON with this shape:\n"
+                        "{\n"
+                        '  "card_summary_bullets": ["bullet 1", "bullet 2", "bullet 3"],\n'
+                        '  "detail_markdown": "## Core Idea\\n...\\n\\n## How It Works\\n...\\n\\n## Why It Matters\\n...\\n\\n## Caveats\\n..."\n'
+                        "}\n\n"
                         "Rules:\n"
-                        "- Write 3-5 bullet points, each on its own line starting with '- '\n"
-                        "- Be specific and include names, dates, acronyms, and standard numbers\n"
-                        "- Include key distinctions, limitations, and why it matters\n"
-                        "- Highlight the most important term in each bullet with **bold**\n"
-                        "- Ignore course codes, slide numbers, and professor names\n"
-                        "- Keep each bullet under 20 words\n"
-                        "- Return only the bullets\n\n"
-                        "Example for 'TCSEC (Orange Book)':\n"
-                        "- **TCSEC** published in 1983 by DoD, first formal security evaluation standard\n"
-                        "- Focuses on **confidentiality** and not integrity or availability\n"
-                        "- Designed for **U.S. government** and military systems"
+                        "- card_summary_bullets: 3-5 bullets, each under 20 words.\n"
+                        "- Be specific: include terms, standards, names, years, acronyms when present.\n"
+                        "- detail_markdown: concise but richer than bullets, with the exact 4 headings shown above.\n"
+                        "- Keep details factual and grounded only in the excerpts.\n"
+                        "- If evidence is weak, say uncertainty explicitly.\n"
+                        "- Do not include code fences or extra text outside JSON."
                     ),
                 }
             ],
         )
-        return msg.choices[0].message.content.strip()
+
+        payload = _extract_json_object(msg.choices[0].message.content.strip())
+        bullets = payload.get("card_summary_bullets") or []
+        if isinstance(bullets, list):
+            clean_bullets = [str(b).strip() for b in bullets if str(b).strip()]
+        else:
+            clean_bullets = []
+
+        summary = "\n".join(f"- {line}" for line in clean_bullets[:5]).strip()
+        if not summary:
+            summary = _fallback_summary(excerpts)
+
+        details = str(payload.get("detail_markdown") or "").strip()
+        if not details:
+            details = _fallback_details(label, excerpts, summary)
+
+        return summary, details
     except Exception:
         logger.exception("Failed to summarize concept %s", label)
-        return excerpts[0] if excerpts else label
+        summary = _fallback_summary(excerpts)
+        details = _fallback_details(label, excerpts, summary)
+        return summary, details
 
 
 def answer_graph_query(query: str, graph_context: str) -> str:
